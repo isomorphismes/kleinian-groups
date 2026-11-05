@@ -21,6 +21,9 @@ def local_only(route ∈ object) → None:
     else:
         route.abort()
 
+def report_browser_error(error ∈ object) → None:
+    print("actual-browser-error: " + as_text(error))
+
 def root_is_charcoal(page ∈ object) → bool:
     return bool(page.evaluate("getComputedStyle(document.body).backgroundColor === 'rgb(33, 33, 33)' && getComputedStyle(document.body).color === 'rgb(244, 244, 244)' && getComputedStyle(document.documentElement).colorScheme === 'dark'"))
 
@@ -79,6 +82,8 @@ try:
             context.route("**/*", local_only)
             page ∈ object ← context.new_page()
             baseline ∈ object ← context.new_page()
+            page.on("pageerror", report_browser_error)
+            baseline.on("pageerror", report_browser_error)
             page.goto(address, wait_until="networkidle")
             baseline.goto(old_address, wait_until="networkidle")
             surfaces(page)
@@ -89,10 +94,17 @@ try:
                     candidate.locator("#width").fill("192")
                     candidate.locator("#height").fill("192")
                     candidate.locator("#iters").fill("2000")
+                    candidate.locator("#a-re").fill("2.2")
+                    candidate.locator("#a-im").fill("0.125")
+                    candidate.locator("#b-re").fill("2.3")
+                    candidate.locator("#b-im").fill("0.125")
                     candidate.locator("#type").select_option(typ)
                     candidate.locator("#render").click()
                     candidate.wait_for_function("document.querySelector('#drawing').width === 192")
                 require(canvas_pixels(page) == canvas_pixels(baseline), "EXACT-SCIENTIFIC-PIXELS-" + typ)
+                page.screenshot(path=as_text(output.joinpath(prefix + "-" + typ + "-actual.png")), full_page=True)
+                baseline.screenshot(path=as_text(output.joinpath(prefix + "-" + typ + "-preceding.png")), full_page=True)
+                print("actual-pixel-observation " + typ + " " + as_text(page.locator("#drawing").evaluate("(c) => { const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data; let opaque=0,black=0,white=0; for(let i=0;i<d.length;i+=4){if(d[i+3]===255)opaque++;if(d[i]===0&&d[i+1]===0&&d[i+2]===0)black++;if(d[i]===255&&d[i+1]===255&&d[i+2]===255)white++;}return JSON.stringify({opaque,black,white,total:d.length/4});}")))
                 require(bool(page.locator("#drawing").evaluate("""(canvas) => {
                   const data = canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
                   let white = 0, black = 0;
@@ -118,7 +130,7 @@ try:
             require(not root_is_charcoal(page), "WHITE-ROOT-NEGATIVE")
             context.close()
     wasm_bytes ∈ bytes ← root.joinpath("kleinian-web/pkg/kleinian_web_bg.wasm").read_bytes()
-    report ∈ str ← json.dumps({"palette": "PASS", "ordinary_text_AA": "PASS", "phone_desktop_both_schemes": "PASS", "source_and_html_body_unchanged": "PASS", "three_symmetry_types_actual_WASM_exact_pixels": "PASS", "keyboard_focus": "PASS", "white_root_negative": "REJECTED", "wasm_sha256": hashlib.sha256(wasm_bytes).hexdigest(), "scientific_black_white_canvas": "PRESERVED_EXEMPT", "android": "NOT_APPLICABLE"}, sort_keys=True, indent=2)
+    report ∈ str ← json.dumps({"palette": "PASS", "ordinary_text_AA": "PASS", "phone_desktop_both_schemes": "PASS", "source_and_html_body_unchanged": "PASS", "three_symmetry_types_actual_WASM_exact_pixels": "PASS", "keyboard_focus": "PASS", "white_root_negative": "REJECTED", "wasm_sha256": hashlib.sha256(wasm_bytes).hexdigest(), "scientific_black_white_canvas": "PRESERVED_EXEMPT", "fixed_complex_trace_fixture": "a=2.2+0.125i,b=2.3+0.125i", "equal_real_trace_xxi_default": "BASELINE_AND_CURRENT_NONTRIVIAL_PLOT_FAIL_RETAINED_RUN42022608761", "android": "NOT_APPLICABLE"}, sort_keys=True, indent=2)
     output.joinpath("receipt.json").write_text(report + "\n", encoding="utf-8")
     print(report)
 finally:
