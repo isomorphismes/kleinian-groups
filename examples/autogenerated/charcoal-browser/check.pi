@@ -103,8 +103,13 @@ try:
                   }
                   return white > 0 && black > 0;
                 }""")), "ACTUAL-NONTRIVIAL-WASM-PLOT-" + typ)
+                page.mouse.move(1, 1)
                 surfaces(page)
                 page.screenshot(path=as_text(output.joinpath(prefix + "-" + typ + ".png")), full_page=True)
+            page.locator("#render").hover()
+            require(as_text(page.locator("#render").evaluate("(e) => getComputedStyle(e).backgroundColor")) == "rgb(69, 69, 69)", "EXPLICIT-HOVER-SURFACE")
+            page.mouse.move(1, 1)
+            surfaces(page)
             page.locator("#height").focus()
             page.keyboard.press("Tab")
             require(as_text(page.locator("#width").evaluate("(e) => getComputedStyle(e).outlineColor")) == "rgb(180, 180, 180)", "KEYBOARD-FOCUS")
