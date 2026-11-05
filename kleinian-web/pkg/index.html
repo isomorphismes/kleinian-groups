@@ -1,6 +1,25 @@
 <html>
   <head>
     <meta content="text/html;charset=utf-8" http-equiv="Content-Type"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <meta name="theme-color" content="#212121"/>
+    <style>
+      html { color-scheme: dark; background: #212121; color: #F4F4F4; }
+      body { background: #212121; color: #F4F4F4; font-family: system-ui, sans-serif; }
+      .controls { background: #2F2F2F; border: 1px solid #454545; padding: 0.75rem; }
+      .controls > div { margin-bottom: 0.5rem; }
+      input, select, button {
+        background: #383838; color: #F4F4F4; border: 1px solid #454545;
+        border-radius: 3px; padding: 0.25rem; font: inherit; caret-color: #F4F4F4;
+      }
+      input { max-width: 7rem; }
+      button:hover { background: #454545; }
+      :focus-visible { outline: 2px solid #B4B4B4; outline-offset: 2px; }
+      ::selection { background: #595959; color: #F4F4F4; }
+      a { color: #B4B4B4; }
+      a:hover { color: #F4F4F4; }
+      canvas { display: block; max-width: 100%; height: auto; margin-top: 0.75rem; }
+    </style>
   </head>
   <script type="module" src="index.js"></script>
   <body>
