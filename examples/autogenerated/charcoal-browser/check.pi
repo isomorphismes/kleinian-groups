@@ -1,0 +1,142 @@
+"""Observe the real unchanged Rust/Wasm renderer beside its charcoal controls."""
+from pathlib import Path
+from builtins import ValueError, bool, str, int, object, list
+import hashlib
+import http.server
+import functools
+import threading
+import json
+from playwright.sync_api import sync_playwright
+
+def as_text(value ∈ object) → str:
+    return str(value)
+
+def require(condition ∈ bool, reason ∈ str) → None:
+    if not condition:
+        raise ValueError(reason)
+
+def local_only(route ∈ object) → None:
+    if as_text(route.request.url).startswith("http://127.0.0.1:"):
+        route.continue_()
+    else:
+        route.abort()
+
+def report_browser_error(error ∈ object) → None:
+    print("actual-browser-error: " + as_text(error))
+
+def root_is_charcoal(page ∈ object) → bool:
+    return bool(page.evaluate("getComputedStyle(document.body).backgroundColor === 'rgb(33, 33, 33)' && getComputedStyle(document.body).color === 'rgb(244, 244, 244)' && getComputedStyle(document.documentElement).colorScheme === 'dark'"))
+
+def surfaces(page ∈ object) → None:
+    require(root_is_charcoal(page), "CHARCOAL-ROOT")
+    require(bool(page.evaluate("""() => {
+      const color = (e) => getComputedStyle(e).backgroundColor;
+      return color(document.querySelector('.controls')) === 'rgb(47, 47, 47)'
+        && [...document.querySelectorAll('input,select,button')].every(e => color(e) === 'rgb(56, 56, 56)');
+    }""")), "CONTROL-SURFACES")
+    require(bool(page.evaluate("""() => {
+      const lum = (color) => {
+        const c = color.match(/[0-9.]+/g).slice(0,3).map(Number).map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
+        return c[0] * .2126 + c[1] * .7152 + c[2] * .0722;
+      };
+      return [...document.querySelectorAll('label,input,select,button,a,.controls > div')].filter(e => e.getClientRects().length).every(e => {
+        const fg = lum(getComputedStyle(e).color);
+        const bg = lum(e.closest('.controls') ? 'rgb(56,56,56)' : 'rgb(33,33,33)');
+        return (Math.max(fg,bg)+.05) / (Math.min(fg,bg)+.05) >= 4.5;
+      });
+    }""")), "ORDINARY-TEXT-AA")
+
+def canvas_pixels(page ∈ object) → str:
+    return as_text(page.locator("#drawing").evaluate("(canvas) => canvas.toDataURL()"))
+
+root ∈ Path ← Path.cwd()
+output ∈ Path ← root.joinpath("build/charcoal")
+output.mkdir(parents=True, exist_ok=True)
+for path in ["Cargo.toml", "kleinian/Cargo.toml", "kleinian/src/lib.rs", "kleinian/src/algebra.rs", "kleinian/src/circle.rs", "kleinian/src/queue.rs", "kleinian/src/window.rs", "kleinian-web/Cargo.toml", "kleinian-web/src/lib.rs", "kleinian-web/pkg/index.js"]:
+    current_bytes ∈ bytes ← root.joinpath(path).read_bytes()
+    preceding_bytes ∈ bytes ← root.joinpath(".baseline", path).read_bytes()
+    require(current_bytes == preceding_bytes, "SOURCE-UNCHANGED-" + path)
+current ∈ str ← root.joinpath("kleinian-web/pkg/index.html").read_text(encoding="utf-8")
+original ∈ str ← root.joinpath(".baseline/kleinian-web/pkg/index.html").read_text(encoding="utf-8")
+current_body ∈ list[str] ← current.split("<body>", 1)
+original_body ∈ list[str] ← original.split("<body>", 1)
+require(current_body[1] == original_body[1], "BODY-CONTROLS-AND-CONTENT-UNCHANGED")
+handler ∈ object ← functools.partial(http.server.SimpleHTTPRequestHandler, directory=as_text(root.joinpath("kleinian-web/pkg")))
+server ∈ object ← http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+worker ∈ object ← threading.Thread(target=server.serve_forever, daemon=True)
+worker.start()
+old_handler ∈ object ← functools.partial(http.server.SimpleHTTPRequestHandler, directory=as_text(root.joinpath(".baseline/kleinian-web/pkg")))
+old_server ∈ object ← http.server.ThreadingHTTPServer(("127.0.0.1", 0), old_handler)
+old_worker ∈ object ← threading.Thread(target=old_server.serve_forever, daemon=True)
+old_worker.start()
+parts ∈ tuple[str, int] ← server.server_address
+address ∈ str ← "http://127.0.0.1:" + as_text(parts[1])
+old_parts ∈ tuple[str, int] ← old_server.server_address
+old_address ∈ str ← "http://127.0.0.1:" + as_text(old_parts[1])
+driver ∈ object ← sync_playwright().start()
+browser ∈ object ← driver.chromium.launch()
+try:
+    for scheme in ["light", "dark"]:
+        for width in [390, 1280]:
+            context ∈ object ← browser.new_context(color_scheme=scheme, viewport={"width": width, "height": 900})
+            context.route("**/*", local_only)
+            page ∈ object ← context.new_page()
+            baseline ∈ object ← context.new_page()
+            page.on("pageerror", report_browser_error)
+            baseline.on("pageerror", report_browser_error)
+            page.goto(address, wait_until="networkidle")
+            baseline.goto(old_address, wait_until="networkidle")
+            surfaces(page)
+            prefix ∈ str ← as_text(width) + "-" + scheme
+            page.screenshot(path=as_text(output.joinpath(prefix + "-empty.png")), full_page=True)
+            for typ in ["oi", "xxi", "xii"]:
+                for candidate in [page, baseline]:
+                    candidate.locator("#width").fill("192")
+                    candidate.locator("#height").fill("192")
+                    candidate.locator("#iters").fill("2000")
+                    candidate.locator("#a-re").fill("2.2")
+                    candidate.locator("#a-im").fill("0.125")
+                    candidate.locator("#b-re").fill("2.3")
+                    candidate.locator("#b-im").fill("0.125")
+                    candidate.locator("#type").select_option(typ)
+                    candidate.locator("#render").click()
+                    candidate.wait_for_function("document.querySelector('#drawing').width === 192")
+                require(canvas_pixels(page) == canvas_pixels(baseline), "EXACT-SCIENTIFIC-PIXELS-" + typ)
+                page.screenshot(path=as_text(output.joinpath(prefix + "-" + typ + "-actual.png")), full_page=True)
+                baseline.screenshot(path=as_text(output.joinpath(prefix + "-" + typ + "-preceding.png")), full_page=True)
+                print("actual-pixel-observation " + typ + " " + as_text(page.locator("#drawing").evaluate("(c) => { const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data; let opaque=0,black=0,white=0; for(let i=0;i<d.length;i+=4){if(d[i+3]===255)opaque++;if(d[i]===0&&d[i+1]===0&&d[i+2]===0)black++;if(d[i]===255&&d[i+1]===255&&d[i+2]===255)white++;}return JSON.stringify({opaque,black,white,total:d.length/4});}")))
+                require(bool(page.locator("#drawing").evaluate("""(canvas) => {
+                  const data = canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+                  let white = 0, black = 0;
+                  for(let i=0;i<data.length;i+=4) {
+                    if(data[i+3] !== 255) return false;
+                    if(data[i]===255 && data[i+1]===255 && data[i+2]===255) white++;
+                    if(data[i]===0 && data[i+1]===0 && data[i+2]===0) black++;
+                  }
+                  return white > 0 && black > 0;
+                }""")), "ACTUAL-NONTRIVIAL-WASM-PLOT-" + typ)
+                page.mouse.move(1, 1)
+                surfaces(page)
+                page.screenshot(path=as_text(output.joinpath(prefix + "-" + typ + ".png")), full_page=True)
+            page.locator("#render").hover()
+            require(as_text(page.locator("#render").evaluate("(e) => getComputedStyle(e).backgroundColor")) == "rgb(69, 69, 69)", "EXPLICIT-HOVER-SURFACE")
+            page.mouse.move(1, 1)
+            surfaces(page)
+            page.locator("#height").focus()
+            page.keyboard.press("Tab")
+            require(as_text(page.locator("#width").evaluate("(e) => getComputedStyle(e).outlineColor")) == "rgb(180, 180, 180)", "KEYBOARD-FOCUS")
+            page.screenshot(path=as_text(output.joinpath(prefix + "-focus.png")), full_page=True)
+            page.evaluate("document.body.style.backgroundColor = 'white'")
+            require(not root_is_charcoal(page), "WHITE-ROOT-NEGATIVE")
+            context.close()
+    wasm_bytes ∈ bytes ← root.joinpath("kleinian-web/pkg/kleinian_web_bg.wasm").read_bytes()
+    report ∈ str ← json.dumps({"palette": "PASS", "ordinary_text_AA": "PASS", "phone_desktop_both_schemes": "PASS", "source_and_html_body_unchanged": "PASS", "three_symmetry_types_actual_WASM_exact_pixels": "PASS", "keyboard_focus": "PASS", "white_root_negative": "REJECTED", "wasm_sha256": hashlib.sha256(wasm_bytes).hexdigest(), "scientific_black_white_canvas": "PRESERVED_EXEMPT", "fixed_complex_trace_fixture": "a=2.2+0.125i,b=2.3+0.125i", "equal_real_trace_xxi_default": "BASELINE_AND_CURRENT_NONTRIVIAL_PLOT_FAIL_RETAINED_RUN42022608761", "android": "NOT_APPLICABLE"}, sort_keys=True, indent=2)
+    output.joinpath("receipt.json").write_text(report + "\n", encoding="utf-8")
+    print(report)
+finally:
+    browser.close()
+    driver.stop()
+    server.shutdown()
+    old_server.shutdown()
+    server.server_close()
+    old_server.server_close()
